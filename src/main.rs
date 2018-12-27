@@ -1,35 +1,106 @@
+extern crate clap;
+use clap::{Arg, App};
+
 mod term;
 mod net;
+mod extra;
 
-// Note: using a different syntax (because the parser is dumb).
-// [@a b c d] stands for [let (a,b) = c in d]
-// [:a b] stands for [(a b)]
-// [#a b] stands for [λa. b]
-// [&a b] stands for [(a,b)]
+use term::*;
+use extra::*;
 
-fn main() {
-    let _ex2 = term::from_string(b"
-        @add0 add1 #n ::n
-            #np #m0 #S #Z :S ::add0 np m0
-            #m1 m1
-        ::add1
-            #S0 #Z0 :S0 #S1 #Z1 :S1 #S2 #Z2 :S2 #S3 #Z3 Z3
-            #S4 #Z4 :S4 #S5 #Z5 :S5 #S6 #Z6 Z6
-    ");
+use std::io;
+use std::io::prelude::*;
+use std::fs::File;
 
-    let ex3 = term::from_string(b"
-        @f1x f1y f
-        @f2x f2y #x2 :f1x :f1y x2
-        @f4x f4y #x4 :f2x :f2y x4
-        @f8x f8y #x8 :f4x :f4y x8
-        -f8x
-        -b
-        ::#f #x :f8y x 
-          #t #A #B ::t B A
-          #a #b a
-    ");
-    println!("-- Input:\n{}", ex3);
-    println!("-- Net:\n{:?}", term::to_net(&ex3));
-    println!("-- Input:\n{}", term::from_net(&term::to_net(&ex3)));
-    println!("-- Normal:\n{}", term::reduce(&ex3));
+fn main() -> io::Result<()> {
+    let matches = App::new("Symmetric Interaction Calculus")
+        .version("0.1.0")
+        .author("Victor Maia <srvictormaia@gmail.com>")
+        .about("Evaluates SIC programs")
+        .arg(Arg::with_name("INPUT")
+            .short("i")
+            .long("input")
+            .value_name("INPUT")
+            .help("Input term")
+            .takes_value(true))
+        .arg(Arg::with_name("AINPUT")
+            .short("a")
+            .long("ainput")
+            .value_name("AINPUT")
+            .help("Input term, encoded as ascii")
+            .takes_value(true))
+        .arg(Arg::with_name("BINPUT")
+            .short("b")
+            .long("binput")
+            .value_name("BINPUT")
+            .help("Input term, encoded as a binary string")
+            .takes_value(true))
+        .arg(Arg::with_name("BOUTPUT")
+            .short("B")
+            .long("boutput")
+            .value_name("BOUTPUT")
+            .help("Decodes output as a binary string")
+            .takes_value(false))
+        .arg(Arg::with_name("AOUTPUT")
+            .short("A")
+            .long("aoutput")
+            .value_name("AOUTPUT")
+            .help("Decodes output as ascii")
+            .takes_value(false))
+        .arg(Arg::with_name("STATS")
+            .short("s")
+            .long("stats")
+            .value_name("STATS")
+            .help("Show stats")
+            .takes_value(false))
+        .arg(Arg::with_name("FILE")
+            .help("Sets the input file to use")
+            .required(true)
+            .index(1))
+        .get_matches();
+
+    let file_name = matches.value_of("FILE").unwrap();
+    let mut file = File::open(file_name)?;
+    let mut code = Vec::new();
+    file.read_to_end(&mut code)?;
+
+    let input : Option<Vec<u8>> = match matches.value_of("AINPUT") {
+        Some(ascii) => Some(to_string(&bitstring_to_term(&ascii_to_bits(ascii.as_bytes()), 0))),
+        None => match matches.value_of("BINPUT") {
+            Some(bits) => Some(to_string(&bitstring_to_term(bits.as_bytes(), 0))),
+            None => match matches.value_of("INPUT") {
+                Some(term) => Some(term.as_bytes().to_vec()),
+                None => None
+            }
+        }
+    };
+
+    match input {
+        Some(mut input) => {
+            code.extend_from_slice(b"\n:main ");
+            code.append(&mut input);
+        },
+        None => {}
+    }
+
+    let term = from_string(&code);
+    let mut net = to_net(&term);
+    let stats = net::reduce(&mut net);
+    let norm = from_net(&net);
+
+    let output = if matches.is_present("BOUTPUT") {
+        term_to_bitstring(&norm)
+    } else if matches.is_present("AOUTPUT") {
+        bits_to_ascii(&term_to_bitstring(&norm))
+    } else {
+        to_string(&norm)
+    };
+
+    println!("{}", String::from_utf8_lossy(&output));
+
+    if matches.is_present("STATS") {
+        println!("{:?}", stats);
+    }
+
+    Ok(())
 }
